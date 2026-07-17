@@ -3,6 +3,10 @@
 An end-to-end machine learning platform for housing price prediction,
 analytics, and explainable AI.
 
+## Live Demo
+
+🔗 https://housing-intelligence-platform.streamlit.app
+
 ## Features
 
 - XGBoost Housing Price Prediction
