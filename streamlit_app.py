@@ -10,14 +10,28 @@ Set API_URL for deployment (default: http://127.0.0.1:8000).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
+import joblib
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
 APP_TITLE = "Housing Intelligence Platform"
+BASE_DIR = Path(__file__).resolve().parent
+DATASET_PATH = BASE_DIR / "House Price India.csv"
+ARTIFACTS_DIR = BASE_DIR / "artifacts"
+MODEL_PATH = ARTIFACTS_DIR / "housing_model.joblib"
+METADATA_PATH = ARTIFACTS_DIR / "training_metadata.joblib"
 DEFAULT_API_URL = os.getenv("API_URL", "http://127.0.0.1:8000").rstrip("/")
 PREDICT_ENDPOINT = f"{DEFAULT_API_URL}/predict"
+TARGET_COLUMN = "Price"
+DROP_COLUMNS = {"id", "Date"}
+PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
 
 DEFAULT_PROPERTY: dict[str, float | int] = {
     "number of bedrooms": 4,
@@ -50,7 +64,7 @@ def apply_custom_styles() -> None:
         .block-container {
             padding-top: 2rem;
             padding-bottom: 2rem;
-            max-width: 1100px;
+            max-width: 1240px;
         }
         div[data-testid="stSidebar"] {
             background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
@@ -83,14 +97,66 @@ def apply_custom_styles() -> None:
         .section-card {
             background: #ffffff;
             border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 1.25rem 1.5rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.9rem;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
         }
         .section-card h3 {
             margin-top: 0;
             color: #0f172a;
+        }
+        .kpi-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e2e8f0;
+            border-top: 3px solid #2563eb;
+            border-radius: 8px;
+            padding: 0.9rem 1rem;
+            min-height: 96px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+        }
+        .kpi-label {
+            color: #475569;
+            font-size: 0.76rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 0.35rem;
+        }
+        .kpi-value {
+            color: #0f172a;
+            font-size: 1.35rem;
+            font-weight: 700;
+            line-height: 1.15;
+        }
+        .kpi-help {
+            color: #64748b;
+            font-size: 0.78rem;
+            margin-top: 0.35rem;
+        }
+        .analytics-caption {
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+        .analytics-title {
+            color: #0f172a;
+            font-size: 1.35rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+        div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+            gap: 0.25rem;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 1rem;
+        }
+        div[data-testid="stTabs"] [data-baseweb="tab"] {
+            border-radius: 6px 6px 0 0;
+            padding: 0.65rem 0.9rem;
+            font-weight: 600;
+        }
+        div[data-testid="stDataFrame"] {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
         }
         </style>
         """,
@@ -167,6 +233,260 @@ def fetch_prediction(payload: dict[str, Any]) -> dict[str, Any]:
         return response.json()
 
     raise RuntimeError(parse_api_error(response))
+
+
+def format_currency_compact(value: float) -> str:
+    return f"₹{value:,.0f}"
+
+
+def format_number(value: float | int) -> str:
+    return f"{value:,.0f}"
+
+
+def render_kpi_card(label: str, value: str, help_text: str | None = None) -> None:
+    help_markup = f'<div class="kpi-help">{help_text}</div>' if help_text else ""
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+            {help_markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def load_dataset() -> pd.DataFrame:
+    if not DATASET_PATH.exists():
+        raise FileNotFoundError(f"Dataset not found: {DATASET_PATH}")
+    return pd.read_csv(DATASET_PATH)
+
+
+@st.cache_data(show_spinner=False)
+def load_training_metadata() -> dict[str, Any]:
+    if not METADATA_PATH.exists():
+        return {}
+    return joblib.load(METADATA_PATH)
+
+
+@st.cache_resource(show_spinner=False)
+def load_model_pipeline() -> Any:
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model artifact not found: {MODEL_PATH}")
+    return joblib.load(MODEL_PATH)
+
+
+def get_feature_columns(df: pd.DataFrame, metadata: dict[str, Any]) -> list[str]:
+    metadata_features = metadata.get("feature_columns")
+    if metadata_features:
+        return [column for column in metadata_features if column in df.columns]
+
+    excluded_columns = {TARGET_COLUMN, *DROP_COLUMNS}
+    return [column for column in df.columns if column not in excluded_columns]
+
+
+def get_numeric_analysis_frame(df: pd.DataFrame) -> pd.DataFrame:
+    return df.drop(columns=list(DROP_COLUMNS), errors="ignore").select_dtypes(
+        include=["number"]
+    )
+
+
+def apply_analytics_filters(
+    df: pd.DataFrame,
+    price_range: tuple[int, int],
+    bedroom_range: tuple[int, int],
+    bathroom_range: tuple[float, float],
+    grade_range: tuple[int, int],
+) -> pd.DataFrame:
+    filtered_df = df.copy()
+    filtered_df = filtered_df[
+        filtered_df[TARGET_COLUMN].between(price_range[0], price_range[1])
+    ]
+    filtered_df = filtered_df[
+        filtered_df["number of bedrooms"].between(bedroom_range[0], bedroom_range[1])
+    ]
+    filtered_df = filtered_df[
+        filtered_df["number of bathrooms"].between(
+            bathroom_range[0], bathroom_range[1]
+        )
+    ]
+    filtered_df = filtered_df[
+        filtered_df["grade of the house"].between(grade_range[0], grade_range[1])
+    ]
+    return filtered_df
+
+
+def render_analytics_filters(df: pd.DataFrame) -> pd.DataFrame:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("Interactive Filters")
+    st.caption("Filter the dataset before reviewing analytics and downloads.")
+
+    price_min = int(df[TARGET_COLUMN].min())
+    price_max = int(df[TARGET_COLUMN].max())
+    bedroom_min = int(df["number of bedrooms"].min())
+    bedroom_max = int(df["number of bedrooms"].max())
+    bathroom_min = float(df["number of bathrooms"].min())
+    bathroom_max = float(df["number of bathrooms"].max())
+    grade_min = int(df["grade of the house"].min())
+    grade_max = int(df["grade of the house"].max())
+
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        price_range = st.slider(
+            "Price range",
+            min_value=price_min,
+            max_value=price_max,
+            value=(price_min, price_max),
+            format="₹%d",
+        )
+        bathroom_range = st.slider(
+            "Bathrooms",
+            min_value=bathroom_min,
+            max_value=bathroom_max,
+            value=(bathroom_min, bathroom_max),
+            step=0.25,
+        )
+
+    with filter_col2:
+        bedroom_range = st.slider(
+            "Bedrooms",
+            min_value=bedroom_min,
+            max_value=bedroom_max,
+            value=(bedroom_min, bedroom_max),
+        )
+        grade_range = st.slider(
+            "Grade",
+            min_value=grade_min,
+            max_value=grade_max,
+            value=(grade_min, grade_max),
+        )
+
+    filtered_df = apply_analytics_filters(
+        df=df,
+        price_range=price_range,
+        bedroom_range=bedroom_range,
+        bathroom_range=bathroom_range,
+        grade_range=grade_range,
+    )
+
+    st.caption(
+        f"Showing {len(filtered_df):,} of {len(df):,} records after active filters."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+    return filtered_df
+
+
+def get_transformed_feature_names(
+    pipeline: Any, feature_columns: list[str]
+) -> list[str]:
+    preprocessor = getattr(pipeline, "named_steps", {}).get("preprocessor")
+    if preprocessor is None:
+        return feature_columns
+
+    try:
+        names = preprocessor.get_feature_names_out(feature_columns)
+    except Exception:
+        names = feature_columns
+
+    cleaned_names = []
+    for name in names:
+        cleaned_name = str(name)
+        if "__" in cleaned_name:
+            cleaned_name = cleaned_name.split("__", 1)[1]
+        cleaned_names.append(cleaned_name)
+    return cleaned_names
+
+
+def get_feature_importance(
+    pipeline: Any, metadata: dict[str, Any]
+) -> pd.DataFrame:
+    regressor = getattr(pipeline, "named_steps", {}).get("regressor")
+    importances = getattr(regressor, "feature_importances_", None)
+    if importances is None:
+        return pd.DataFrame(columns=["feature", "importance"])
+
+    feature_columns = metadata.get("feature_columns", [])
+    feature_names = get_transformed_feature_names(pipeline, feature_columns)
+    if len(feature_names) != len(importances):
+        feature_names = [f"Feature {index + 1}" for index in range(len(importances))]
+
+    importance_df = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "importance": np.asarray(importances, dtype=float),
+        }
+    )
+    return importance_df.sort_values("importance", ascending=False)
+
+
+@st.cache_data(show_spinner=False)
+def compute_shap_summary(
+    feature_sample: pd.DataFrame,
+    feature_columns: tuple[str, ...],
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None, str | None]:
+    try:
+        import shap
+    except Exception as exc:
+        return None, None, f"SHAP is not installed or could not be imported: {exc}"
+
+    try:
+        pipeline = joblib.load(MODEL_PATH)
+        preprocessor = pipeline.named_steps["preprocessor"]
+        regressor = pipeline.named_steps["regressor"]
+
+        transformed_sample = preprocessor.transform(
+            feature_sample[list(feature_columns)]
+        )
+        if hasattr(transformed_sample, "toarray"):
+            transformed_sample = transformed_sample.toarray()
+
+        transformed_sample = np.asarray(transformed_sample)
+        feature_names = get_transformed_feature_names(pipeline, list(feature_columns))
+        if len(feature_names) != transformed_sample.shape[1]:
+            feature_names = [
+                f"Feature {index + 1}"
+                for index in range(transformed_sample.shape[1])
+            ]
+
+        explainer = shap.TreeExplainer(regressor)
+        shap_values = explainer.shap_values(transformed_sample)
+        if isinstance(shap_values, list):
+            shap_values = shap_values[0]
+
+        shap_values = np.asarray(shap_values)
+        mean_abs_values = np.abs(shap_values).mean(axis=0)
+        importance_df = pd.DataFrame(
+            {
+                "feature": feature_names,
+                "mean_abs_shap": mean_abs_values,
+            }
+        ).sort_values("mean_abs_shap", ascending=False)
+
+        impact_rows = []
+        top_features = importance_df.head(8)["feature"].tolist()
+        feature_index = {feature: index for index, feature in enumerate(feature_names)}
+        for feature in top_features:
+            index = feature_index[feature]
+            impact_rows.append(
+                pd.DataFrame(
+                    {
+                        "feature": feature,
+                        "shap_value": shap_values[:, index],
+                        "feature_value": transformed_sample[:, index],
+                    }
+                )
+            )
+
+        impact_df = (
+            pd.concat(impact_rows, ignore_index=True)
+            if impact_rows
+            else pd.DataFrame(columns=["feature", "shap_value", "feature_value"])
+        )
+        return importance_df, impact_df, None
+    except Exception as exc:
+        return None, None, f"SHAP calculation failed: {exc}"
 
 
 def render_sidebar_inputs() -> None:
@@ -394,22 +714,423 @@ def render_prediction_section() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def render_dataset_overview(
+    df: pd.DataFrame,
+    filtered_df: pd.DataFrame,
+    feature_columns: list[str],
+) -> None:
+    st.subheader("Dataset Overview")
+    total_missing = int(filtered_df.isna().sum().sum())
+
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4, gap="small")
+    with kpi_col1:
+        render_kpi_card(
+            "Total Records",
+            format_number(len(filtered_df)),
+            "Filtered rows",
+        )
+    with kpi_col2:
+        render_kpi_card("Features", format_number(len(feature_columns)), "Model inputs")
+    with kpi_col3:
+        render_kpi_card(
+            "Dataset Shape",
+            f"{filtered_df.shape[0]:,} x {filtered_df.shape[1]:,}",
+            "Rows x columns",
+        )
+    with kpi_col4:
+        render_kpi_card("Missing Values", format_number(total_missing), "Filtered data")
+
+    st.markdown("#### Missing Values Summary")
+    missing_summary = (
+        filtered_df.isna()
+        .sum()
+        .rename("missing_values")
+        .reset_index()
+        .rename(columns={"index": "column"})
+    )
+    missing_summary["missing_percent"] = (
+        missing_summary["missing_values"] / max(len(filtered_df), 1) * 100
+    ).round(2)
+
+    if total_missing == 0:
+        st.success("No missing values found in the filtered dataset.")
+    st.dataframe(missing_summary, use_container_width=True, height=180)
+
+    st.markdown("#### Basic Statistics")
+    stats_columns = [
+        column
+        for column in [*feature_columns, TARGET_COLUMN]
+        if column in filtered_df
+    ]
+    stats_df = filtered_df[stats_columns].describe().T.round(2)
+    st.dataframe(stats_df, use_container_width=True, height=260)
+
+    st.caption(f"Full source dataset contains {len(df):,} records.")
+
+
+def render_price_analytics(filtered_df: pd.DataFrame) -> None:
+    st.subheader("Price Analytics")
+    price_series = filtered_df[TARGET_COLUMN]
+
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4, gap="small")
+    with metric_col1:
+        render_kpi_card("Mean Price", format_currency_compact(price_series.mean()))
+    with metric_col2:
+        render_kpi_card("Median Price", format_currency_compact(price_series.median()))
+    with metric_col3:
+        render_kpi_card("Minimum Price", format_currency_compact(price_series.min()))
+    with metric_col4:
+        render_kpi_card("Maximum Price", format_currency_compact(price_series.max()))
+
+    chart_col1, chart_col2 = st.columns([1.35, 1], gap="medium")
+    with chart_col1:
+        histogram = px.histogram(
+            filtered_df,
+            x=TARGET_COLUMN,
+            nbins=50,
+            title="Price Distribution",
+            labels={TARGET_COLUMN: "Price (INR)"},
+            color_discrete_sequence=["#2563eb"],
+        )
+        histogram.update_layout(
+            template="plotly_white",
+            height=420,
+            margin=dict(l=20, r=20, t=60, b=20),
+            bargap=0.04,
+            yaxis_title="Number of properties",
+        )
+        histogram.update_xaxes(tickprefix="₹")
+        st.plotly_chart(histogram, use_container_width=True, config=PLOTLY_CONFIG)
+
+    with chart_col2:
+        boxplot = px.box(
+            filtered_df,
+            x=TARGET_COLUMN,
+            points="outliers",
+            title="Price Spread",
+            labels={TARGET_COLUMN: "Price (INR)"},
+            color_discrete_sequence=["#14b8a6"],
+        )
+        boxplot.update_layout(
+            template="plotly_white",
+            height=420,
+            margin=dict(l=20, r=20, t=60, b=20),
+        )
+        boxplot.update_xaxes(tickprefix="₹")
+        st.plotly_chart(boxplot, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def render_correlation_analysis(filtered_df: pd.DataFrame) -> None:
+    st.subheader("Correlation Analysis")
+    numeric_df = get_numeric_analysis_frame(filtered_df)
+    if TARGET_COLUMN not in numeric_df.columns or len(numeric_df) < 2:
+        st.info("Correlation analysis needs at least two rows with numeric price data.")
+        return
+
+    correlation_df = numeric_df.corr(numeric_only=True)
+    heatmap = go.Figure(
+        data=go.Heatmap(
+            z=correlation_df.values,
+            x=correlation_df.columns,
+            y=correlation_df.index,
+            zmin=-1,
+            zmax=1,
+            zmid=0,
+            colorscale="RdBu",
+            colorbar=dict(title="Correlation"),
+        )
+    )
+    heatmap.update_layout(
+        title="Numeric Feature Correlation Heatmap",
+        template="plotly_white",
+        height=650,
+        margin=dict(l=20, r=20, t=70, b=20),
+    )
+    st.plotly_chart(heatmap, use_container_width=True, config=PLOTLY_CONFIG)
+
+    price_correlations = (
+        correlation_df[TARGET_COLUMN]
+        .drop(labels=[TARGET_COLUMN], errors="ignore")
+        .dropna()
+    )
+    top_correlations = price_correlations.reindex(
+        price_correlations.abs().sort_values(ascending=False).head(10).index
+    )
+    top_correlation_df = (
+        top_correlations.rename("correlation")
+        .reset_index()
+        .rename(columns={"index": "feature"})
+    )
+
+    st.markdown("#### Top Features Correlated with Price")
+    top_correlation_chart = px.bar(
+        top_correlation_df.sort_values("correlation"),
+        x="correlation",
+        y="feature",
+        orientation="h",
+        color="correlation",
+        color_continuous_scale="RdBu",
+        range_color=(-1, 1),
+        labels={"correlation": "Correlation with Price", "feature": ""},
+    )
+    top_correlation_chart.update_layout(
+        template="plotly_white",
+        height=430,
+        margin=dict(l=20, r=20, t=20, b=20),
+        coloraxis_showscale=False,
+    )
+    st.plotly_chart(
+        top_correlation_chart,
+        use_container_width=True,
+        config=PLOTLY_CONFIG,
+    )
+    st.dataframe(top_correlation_df.round(4), use_container_width=True, height=220)
+
+
+def render_feature_importance(metadata: dict[str, Any]) -> None:
+    st.subheader("Feature Importance")
+    try:
+        pipeline = load_model_pipeline()
+        importance_df = get_feature_importance(pipeline, metadata)
+    except Exception as exc:
+        st.warning(f"Feature importance is unavailable: {exc}")
+        return
+
+    if importance_df.empty:
+        st.info("The trained model does not expose feature importance values.")
+        return
+
+    top_features = importance_df.head(10).sort_values("importance")
+    importance_chart = px.bar(
+        top_features,
+        x="importance",
+        y="feature",
+        orientation="h",
+        text="importance",
+        title="Top 10 XGBoost Feature Importances",
+        labels={"importance": "Importance", "feature": ""},
+        color="importance",
+        color_continuous_scale="Blues",
+    )
+    importance_chart.update_traces(texttemplate="%{text:.3f}", textposition="outside")
+    importance_chart.update_layout(
+        template="plotly_white",
+        height=480,
+        margin=dict(l=20, r=30, t=60, b=20),
+        coloraxis_showscale=False,
+        xaxis_range=[0, max(top_features["importance"].max() * 1.18, 0.01)],
+    )
+    st.plotly_chart(importance_chart, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def render_model_performance(
+    df: pd.DataFrame,
+    metadata: dict[str, Any],
+) -> None:
+    st.subheader("Model Performance Dashboard")
+    metrics = metadata.get("metrics", {})
+
+    perf_col1, perf_col2, perf_col3, perf_col4, perf_col5 = st.columns(
+        5,
+        gap="small",
+    )
+    with perf_col1:
+        render_kpi_card("R² Score", f"{metrics.get('r2', 0):.4f}", "Test set")
+    with perf_col2:
+        render_kpi_card(
+            "MAE",
+            format_currency_compact(metrics.get("mae", 0)),
+            "Avg error",
+        )
+    with perf_col3:
+        render_kpi_card(
+            "RMSE",
+            format_currency_compact(metrics.get("rmse", 0)),
+            "Large-error weighted",
+        )
+    with perf_col4:
+        render_kpi_card("Dataset Size", format_number(len(df)), "Training CSV")
+    with perf_col5:
+        render_kpi_card("Algorithm", "XGBoost", "Regressor")
+
+
+def render_shap_explainability(
+    filtered_df: pd.DataFrame,
+    feature_columns: list[str],
+) -> None:
+    st.subheader("SHAP Explainability")
+    st.caption(
+        "Global model explanations are calculated on a cached sample of filtered records."
+    )
+
+    if not feature_columns:
+        st.info("SHAP needs the saved training feature list to align model inputs.")
+        return
+
+    sample_size = min(len(filtered_df), 500)
+    if sample_size < 2:
+        st.info("SHAP explainability needs at least two filtered records.")
+        return
+
+    feature_sample = filtered_df[list(feature_columns)].sample(
+        n=sample_size,
+        random_state=42,
+    )
+    with st.spinner("Calculating SHAP explanations..."):
+        shap_importance_df, shap_impact_df, shap_error = compute_shap_summary(
+            feature_sample=feature_sample,
+            feature_columns=tuple(feature_columns),
+        )
+
+    if shap_error:
+        st.info(shap_error)
+        return
+
+    if shap_importance_df is None or shap_impact_df is None:
+        st.info("SHAP explanations are unavailable for this model.")
+        return
+
+    shap_col1, shap_col2 = st.columns([1, 1.2])
+    with shap_col1:
+        global_importance = shap_importance_df.head(10).sort_values("mean_abs_shap")
+        shap_bar = px.bar(
+            global_importance,
+            x="mean_abs_shap",
+            y="feature",
+            orientation="h",
+            title="Global SHAP Importance",
+            labels={"mean_abs_shap": "Mean absolute SHAP value", "feature": ""},
+            color="mean_abs_shap",
+            color_continuous_scale="Teal",
+        )
+        shap_bar.update_layout(
+            template="plotly_white",
+            height=500,
+            margin=dict(l=20, r=20, t=60, b=20),
+            coloraxis_showscale=False,
+        )
+        st.plotly_chart(shap_bar, use_container_width=True, config=PLOTLY_CONFIG)
+
+    with shap_col2:
+        shap_summary = px.scatter(
+            shap_impact_df,
+            x="shap_value",
+            y="feature",
+            color="feature_value",
+            title="SHAP Summary Visualization",
+            labels={
+                "shap_value": "SHAP value impact on prediction",
+                "feature": "",
+                "feature_value": "Feature value",
+            },
+            color_continuous_scale="Viridis",
+        )
+        shap_summary.update_layout(
+            template="plotly_white",
+            height=500,
+            margin=dict(l=20, r=20, t=60, b=20),
+        )
+        shap_summary.add_vline(
+            x=0,
+            line_width=1,
+            line_dash="dash",
+            line_color="#64748b",
+        )
+        st.plotly_chart(shap_summary, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def render_download_section(filtered_df: pd.DataFrame) -> None:
+    st.markdown("#### Download Filtered Dataset")
+    st.caption("Export the currently filtered dataset view as a CSV file.")
+    csv_bytes = filtered_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download CSV",
+        data=csv_bytes,
+        file_name="filtered_housing_dataset.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+
+def render_analytics_section() -> None:
+    st.markdown('<div class="analytics-title">Analytics Dashboard</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="analytics-caption">'
+        "Explore the housing dataset, model behavior, and filtered market slices."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    try:
+        with st.spinner("Loading analytics assets..."):
+            df = load_dataset()
+            metadata = load_training_metadata()
+    except Exception as exc:
+        st.error(f"Could not load analytics assets: {exc}")
+        return
+
+    feature_columns = get_feature_columns(df, metadata)
+    filtered_df = render_analytics_filters(df)
+
+    if filtered_df.empty:
+        st.warning("No records match the active filters. Widen the filters to continue.")
+        return
+
+    (
+        tab_overview,
+        tab_price,
+        tab_correlations,
+        tab_importance,
+        tab_performance,
+        tab_shap,
+    ) = st.tabs(
+        [
+            "Overview",
+            "Price Analytics",
+            "Correlations",
+            "Feature Importance",
+            "Model Performance",
+            "SHAP",
+        ]
+    )
+
+    with tab_overview:
+        render_dataset_overview(df, filtered_df, feature_columns)
+        st.divider()
+        render_download_section(filtered_df)
+
+    with tab_price:
+        render_price_analytics(filtered_df)
+
+    with tab_correlations:
+        render_correlation_analysis(filtered_df)
+
+    with tab_importance:
+        render_feature_importance(metadata)
+
+    with tab_performance:
+        render_model_performance(df, metadata)
+
+    with tab_shap:
+        render_shap_explainability(filtered_df, feature_columns)
+
+
 def render_about_section() -> None:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("About")
     st.markdown(
         f"""
         **{APP_TITLE}** helps analysts and homebuyers estimate residential property
-        prices using machine learning. The frontend collects structured property features,
-        sends them to a FastAPI inference service, and displays the model output in real time.
+        prices using machine learning. The frontend combines real-time prediction with
+        portfolio-ready dataset analytics, model diagnostics, and explainability views.
 
         **How it works**
-        1. Enter property attributes in the sidebar.
-        2. Submit a prediction request to the backend API.
-        3. Review the estimated price and active model version.
+        1. Enter property attributes in the sidebar for prediction.
+        2. Explore the Analytics tab for dataset and model insights.
+        3. Download filtered data slices for offline review.
 
         **Stack**
-        - Frontend: Streamlit
+        - Frontend: Streamlit + Plotly
         - API: FastAPI + XGBoost
         - Backend endpoint: `{PREDICT_ENDPOINT}`
 
@@ -486,8 +1207,8 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_property, tab_prediction, tab_about = st.tabs(
-        ["Property Details", "Prediction", "About"]
+    tab_property, tab_prediction, tab_analytics, tab_about = st.tabs(
+        ["Property Details", "Prediction", "Analytics", "About"]
     )
 
     with tab_property:
@@ -495,6 +1216,9 @@ def main() -> None:
 
     with tab_prediction:
         render_prediction_section()
+
+    with tab_analytics:
+        render_analytics_section()
 
     with tab_about:
         render_about_section()
