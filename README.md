@@ -1,3 +1,20 @@
+# Housing Intelligence Platform
+
+An end-to-end machine learning platform for housing price prediction,
+analytics, and explainable AI.
+
+## Features
+
+- XGBoost Housing Price Prediction
+- FastAPI REST API
+- Streamlit Analytics Dashboard
+- Correlation Analysis
+- Feature Importance Analysis
+- SHAP Explainability
+- Interactive Data Filtering
+- CSV Export
+- Model Performance Monitoring
+
 ## Model Performance
 
 | Metric | Value |
@@ -9,9 +26,28 @@
 Dataset Size: 14,620 records
 Algorithm: XGBoost Regressor
 
-# Housing Intelligence Platform
+# Screenshots
 
-Machine learning platform for predicting housing prices from property features. Train an XGBoost regression model on CSV data and serve predictions through a FastAPI application.
+## 1. Prediction Interface
+![Prediction Interface](screenshots/prediction_interface.png)
+
+## 2. Analytics Dashboard
+![Analytics Dashboard](screenshots/dashboard_overview.png)
+
+## 3. Price Analytics
+![Price Analytics](screenshots/price_analytics.png)
+
+## 4. Correlation Analysis
+![Correlation Analysis](screenshots/correlation_heatmap.png)
+
+## 5. Feature Importance
+![Feature Importance](screenshots/feature_importance.png)
+
+## 6. SHAP Explainability
+![SHAP Explainability](screenshots/shap_explainability.png)
+
+## 7. Model Performance
+![Model Performance](screenshots/model_performance.png)
 
 ## Project structure
 
