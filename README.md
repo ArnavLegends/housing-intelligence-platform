@@ -1,3 +1,14 @@
+## Model Performance
+
+| Metric | Value |
+|----------|----------|
+| R² Score | 0.893 |
+| MAE | 63,533 |
+| RMSE | 122,590 |
+
+Dataset Size: 14,620 records
+Algorithm: XGBoost Regressor
+
 # Housing Intelligence Platform
 
 Machine learning platform for predicting housing prices from property features. Train an XGBoost regression model on CSV data and serve predictions through a FastAPI application.
