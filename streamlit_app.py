@@ -223,17 +223,16 @@ def parse_api_error(response: requests.Response) -> str:
 
 
 def fetch_prediction(payload: dict[str, Any]) -> dict[str, Any]:
-    response = requests.post(
-        PREDICT_ENDPOINT,
-        json=payload,
-        headers={"Content-Type": "application/json"},
-        timeout=30,
-    )
-    if response.ok:
-        return response.json()
+    model = load_model_pipeline()
 
-    raise RuntimeError(parse_api_error(response))
+    input_df = pd.DataFrame([payload])
 
+    prediction = float(model.predict(input_df)[0])
+
+    return {
+        "predicted_price": round(prediction, 2),
+        "model_version": "1.0.0"
+    }
 
 def format_currency_compact(value: float) -> str:
     return f"₹{value:,.0f}"
