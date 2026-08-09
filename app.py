@@ -18,22 +18,14 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
 
-import joblib
-import pandas as pd
 from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
-MODEL_PATH = ARTIFACTS_DIR / "housing_model.joblib"
-PREPROCESSOR_PATH = ARTIFACTS_DIR / "preprocessor.joblib"
-METADATA_PATH = ARTIFACTS_DIR / "training_metadata.joblib"
+from ml.inference import HousingInferenceService, MODEL_VERSION
 
-MODEL_VERSION = "1.0.0"
 APP_TITLE = "Housing Intelligence Platform"
 
 logging.basicConfig(
@@ -44,17 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class AppState:
-    """Holds loaded model artifacts for the lifetime of the application."""
-
-    pipeline: Any = None
-    preprocessor: Any = None
-    metadata: dict[str, Any] = {}
-    feature_columns: list[str] = []
-    is_ready: bool = False
-
-
-state = AppState()
+inference_service = HousingInferenceService()
 
 # Keys must match training feature column names (PredictionRequest aliases).
 PREDICTION_REQUEST_EXAMPLE: dict[str, float | int] = {
@@ -144,59 +126,16 @@ class RootResponse(BaseModel):
     endpoints: dict[str, str]
 
 
-def load_artifacts() -> None:
-    """Load model, preprocessor, and metadata from disk."""
-    missing = [
-        str(path)
-        for path in (MODEL_PATH, PREPROCESSOR_PATH, METADATA_PATH)
-        if not path.exists()
-    ]
-    if missing:
-        raise FileNotFoundError(
-            "Missing required artifact(s). Run `python train.py` first.\n"
-            + "\n".join(f"  - {path}" for path in missing)
-        )
-
-    state.pipeline = joblib.load(MODEL_PATH)
-    state.preprocessor = joblib.load(PREPROCESSOR_PATH)
-    state.metadata = joblib.load(METADATA_PATH)
-    state.feature_columns = state.metadata.get("feature_columns", [])
-
-    if not state.feature_columns:
-        raise ValueError("training_metadata.joblib does not contain feature_columns.")
-
-    state.is_ready = True
-    logger.info("Loaded model from %s", MODEL_PATH)
-    logger.info("Loaded preprocessor from %s", PREPROCESSOR_PATH)
-    logger.info("Loaded metadata from %s", METADATA_PATH)
-
-
-def build_feature_frame(request: PredictionRequest) -> pd.DataFrame:
-    """Convert validated request into a single-row DataFrame aligned with training columns."""
-    record = request.model_dump(by_alias=True)
-    row = {column: record.get(column) for column in state.feature_columns}
-
-    missing_values = [column for column, value in row.items() if value is None]
-    if missing_values:
-        raise ValueError(f"Missing required feature(s): {', '.join(missing_values)}")
-
-    return pd.DataFrame([row])
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load artifacts on startup and release references on shutdown."""
     try:
-        load_artifacts()
+        inference_service.load()
     except Exception:
         logger.exception("Failed to load model artifacts during startup.")
         raise
     yield
-    state.pipeline = None
-    state.preprocessor = None
-    state.metadata = {}
-    state.feature_columns = []
-    state.is_ready = False
+    inference_service.unload()
     logger.info("Application shutdown complete.")
 
 
@@ -255,7 +194,7 @@ def root() -> RootResponse:
 
 @app.get("/health", response_model=HealthResponse, tags=["General"])
 def health() -> HealthResponse:
-    if not state.is_ready:
+    if not inference_service.is_ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model is not loaded.",
@@ -280,22 +219,24 @@ def predict(
         },
     ),
 ) -> PredictionResponse:
-    if not state.is_ready or state.pipeline is None:
+    if not inference_service.is_ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model is not loaded.",
         )
 
     try:
-        input_df = build_feature_frame(request)
-        prediction = float(state.pipeline.predict(input_df)[0])
+        result = inference_service.predict(request.model_dump(by_alias=True))
 
-        if prediction < 0:
-            logger.warning("Model returned a negative price prediction: %s", prediction)
+        if result.predicted_price < 0:
+            logger.warning(
+                "Model returned a negative price prediction: %s",
+                result.predicted_price,
+            )
 
         return PredictionResponse(
-            predicted_price=round(prediction, 2),
-            model_version=MODEL_VERSION,
+            predicted_price=result.predicted_price,
+            model_version=result.model_version,
         )
     except ValueError as exc:
         logger.warning("Prediction rejected: %s", exc)

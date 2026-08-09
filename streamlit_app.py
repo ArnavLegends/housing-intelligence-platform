@@ -21,6 +21,8 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
+from ml.inference import get_inference_service
+
 APP_TITLE = "Housing Intelligence Platform"
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_PATH = BASE_DIR / "House Price India.csv"
@@ -223,15 +225,11 @@ def parse_api_error(response: requests.Response) -> str:
 
 
 def fetch_prediction(payload: dict[str, Any]) -> dict[str, Any]:
-    model = load_model_pipeline()
-
-    input_df = pd.DataFrame([payload])
-
-    prediction = float(model.predict(input_df)[0])
+    result = get_inference_service().predict(payload)
 
     return {
-        "predicted_price": round(prediction, 2),
-        "model_version": "1.0.0"
+        "predicted_price": result.predicted_price,
+        "model_version": result.model_version,
     }
 
 def format_currency_compact(value: float) -> str:
