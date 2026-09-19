@@ -34,6 +34,13 @@ PREDICT_ENDPOINT = f"{DEFAULT_API_URL}/predict"
 TARGET_COLUMN = "Price"
 DROP_COLUMNS = {"id", "Date"}
 PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
+NAV_OPTIONS = [
+    "Home",
+    "Valuation",
+    "Market Intelligence",
+    "Model Insights",
+    "About",
+]
 
 DEFAULT_PROPERTY: dict[str, float | int] = {
     "number of bedrooms": 4,
@@ -86,15 +93,17 @@ def apply_custom_styles() -> None:
             color: white !important;
         }
         .hero-title {
-            font-size: 2.25rem;
+            font-size: 2.55rem;
             font-weight: 700;
             color: #0f172a;
             margin-bottom: 0.25rem;
         }
         .hero-subtitle {
-            font-size: 1.05rem;
+            font-size: 1.08rem;
             color: #64748b;
             margin-bottom: 1.5rem;
+            max-width: 760px;
+            line-height: 1.55;
         }
         .section-card {
             background: #ffffff;
@@ -107,6 +116,107 @@ def apply_custom_styles() -> None:
         .section-card h3 {
             margin-top: 0;
             color: #0f172a;
+        }
+        .top-nav {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 0.75rem 1rem 0.45rem;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+        }
+        .product-hero {
+            padding: 2.5rem 0 1.75rem;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 1.5rem;
+        }
+        .eyebrow {
+            color: #2563eb;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.65rem;
+        }
+        .section-title {
+            color: #0f172a;
+            font-size: 1.45rem;
+            font-weight: 700;
+            margin: 0.25rem 0 0.25rem;
+        }
+        .section-copy {
+            color: #64748b;
+            margin-bottom: 1rem;
+            line-height: 1.55;
+        }
+        .intent-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1.1rem 1.15rem;
+            min-height: 178px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+        }
+        .intent-card.primary {
+            border-color: #93c5fd;
+            border-top: 3px solid #2563eb;
+        }
+        .intent-label {
+            color: #0f172a;
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 0.45rem;
+        }
+        .intent-copy {
+            color: #64748b;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            min-height: 68px;
+        }
+        .status-pill {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 0.18rem 0.58rem;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            background: #eff6ff;
+            color: #1d4ed8;
+            margin-top: 0.65rem;
+        }
+        .status-pill.muted {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+        .page-heading {
+            margin-bottom: 1rem;
+        }
+        .page-kicker {
+            color: #2563eb;
+            font-size: 0.76rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.35rem;
+        }
+        .page-title {
+            color: #0f172a;
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        .page-description {
+            color: #64748b;
+            max-width: 760px;
+            line-height: 1.55;
+        }
+        .coming-soon {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1.4rem 1.5rem;
+            max-width: 760px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
         }
         .kpi-card {
             background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -248,6 +358,161 @@ def render_kpi_card(label: str, value: str, help_text: str | None = None) -> Non
             <div class="kpi-label">{label}</div>
             <div class="kpi-value">{value}</div>
             {help_markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def set_active_page(page: str) -> None:
+    st.session_state.active_page = page
+
+
+def render_navigation() -> str:
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "Home"
+
+    current_page = st.session_state.active_page
+    if current_page not in NAV_OPTIONS:
+        current_page = "Home"
+        st.session_state.active_page = current_page
+
+    st.markdown('<div class="top-nav">', unsafe_allow_html=True)
+    selected_page = st.radio(
+        "Primary navigation",
+        NAV_OPTIONS,
+        index=NAV_OPTIONS.index(current_page),
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if selected_page != current_page:
+        st.session_state.active_page = selected_page
+
+    return st.session_state.active_page
+
+
+def render_page_heading(kicker: str, title: str, description: str) -> None:
+    st.markdown(
+        f"""
+        <div class="page-heading">
+            <div class="page-kicker">{kicker}</div>
+            <div class="page-title">{title}</div>
+            <div class="page-description">{description}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_product_card(
+    title: str,
+    description: str,
+    status: str,
+    primary: bool = False,
+) -> None:
+    card_class = "intent-card primary" if primary else "intent-card"
+    status_class = "status-pill" if primary else "status-pill muted"
+    st.markdown(
+        f"""
+        <div class="{card_class}">
+            <div class="intent-label">{title}</div>
+            <div class="intent-copy">{description}</div>
+            <span class="{status_class}">{status}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_home_page() -> None:
+    st.markdown(
+        f"""
+        <section class="product-hero">
+            <div class="eyebrow">Residential Property Intelligence</div>
+            <div class="hero-title">{APP_TITLE}</div>
+            <div class="hero-subtitle">
+                Residential property intelligence powered by machine learning.
+                Estimate property value, inspect model signals, and explore the data
+                behind the current valuation prototype.
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="section-title">What are you here to do?</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">Choose the workflow that matches your intent. '
+        "Only Sell Property is fully functional in this phase.</div>",
+        unsafe_allow_html=True,
+    )
+
+    col_sell, col_buy = st.columns(2, gap="medium")
+    with col_sell:
+        render_product_card(
+            title="Sell Property",
+            description=(
+                "Estimate a property's value and understand the factors "
+                "influencing the model's estimate."
+            ),
+            status="Fully functional",
+            primary=True,
+        )
+        if st.button("Start Valuation", type="primary", use_container_width=True):
+            set_active_page("Valuation")
+            st.rerun()
+
+    with col_buy:
+        render_product_card(
+            title="Buy Property",
+            description="Compare and evaluate properties using market intelligence.",
+            status="Coming Soon",
+        )
+        st.button("Coming Soon", use_container_width=True, disabled=True, key="buy_soon")
+
+    col_invest, col_market = st.columns(2, gap="medium")
+    with col_invest:
+        render_product_card(
+            title="Invest",
+            description="Explore property opportunities and investment-oriented insights.",
+            status="Coming Soon",
+        )
+        st.button("Coming Soon", use_container_width=True, disabled=True, key="invest_soon")
+
+    with col_market:
+        render_product_card(
+            title="Explore Market",
+            description="Explore housing trends, relationships, and market-level insights.",
+            status="Coming Soon",
+        )
+        st.button("Coming Soon", use_container_width=True, disabled=True, key="market_soon")
+
+
+def render_valuation_page() -> None:
+    render_page_heading(
+        "Sell Property",
+        "Property Valuation",
+        (
+            "Use the current V1 prediction workflow to estimate a property's "
+            "value from the trained model. Phase 2 will simplify these inputs."
+        ),
+    )
+    detail_col, prediction_col = st.columns([1.35, 1], gap="medium")
+    with detail_col:
+        render_property_details_section()
+    with prediction_col:
+        render_prediction_section()
+
+
+def render_coming_soon(title: str, description: str) -> None:
+    st.markdown(
+        f"""
+        <div class="coming-soon">
+            <div class="page-kicker">Coming Soon</div>
+            <div class="page-title">{title}</div>
+            <div class="page-description">{description}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -488,8 +753,8 @@ def compute_shap_summary(
 
 def render_sidebar_inputs() -> None:
     with st.sidebar:
-        st.markdown("### Property Inputs")
-        st.caption("Enter house features to generate a price estimate.")
+        st.markdown("### Valuation Inputs")
+        st.caption("Enter property features to generate the current model estimate.")
 
         st.number_input(
             "Bedrooms",
@@ -633,7 +898,7 @@ def render_sidebar_inputs() -> None:
         )
 
         st.divider()
-        predict_clicked = st.button("Predict Price", type="primary", use_container_width=True)
+        predict_clicked = st.button("Estimate Value", type="primary", use_container_width=True)
 
     if predict_clicked:
         st.session_state.run_prediction = True
@@ -684,7 +949,7 @@ def render_property_details_section() -> None:
 
 def render_prediction_section() -> None:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("Prediction")
+    st.subheader("Estimated Property Value")
     st.caption("Estimated market value from the deployed XGBoost model.")
 
     if st.session_state.get("prediction_error"):
@@ -696,7 +961,7 @@ def render_prediction_section() -> None:
 
         with metric_col1:
             st.metric(
-                label="Predicted House Price",
+                label="Estimated Property Value",
                 value=format_currency(result["predicted_price"]),
             )
 
@@ -706,7 +971,7 @@ def render_prediction_section() -> None:
                 value=result["model_version"],
             )
     else:
-        st.info("Configure property details in the sidebar and click **Predict Price**.")
+        st.info("Configure property details in the sidebar and click **Estimate Value**.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1050,10 +1315,10 @@ def render_download_section(filtered_df: pd.DataFrame) -> None:
 
 
 def render_analytics_section() -> None:
-    st.markdown('<div class="analytics-title">Analytics Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="analytics-title">Model Insights</div>', unsafe_allow_html=True)
     st.markdown(
         '<p class="analytics-caption">'
-        "Explore the housing dataset, model behavior, and filtered market slices."
+        "Explore the current dataset, model behavior, and technical diagnostics."
         "</p>",
         unsafe_allow_html=True,
     )
@@ -1117,23 +1382,24 @@ def render_about_section() -> None:
     st.subheader("About")
     st.markdown(
         f"""
-        **{APP_TITLE}** helps analysts and homebuyers estimate residential property
-        prices using machine learning. The frontend combines real-time prediction with
-        portfolio-ready dataset analytics, model diagnostics, and explainability views.
+        **{APP_TITLE}** is a residential property intelligence prototype that
+        estimates property value with a trained machine learning model and exposes
+        technical model insights for review.
 
         **How it works**
-        1. Enter property attributes in the sidebar for prediction.
-        2. Explore the Analytics tab for dataset and model insights.
-        3. Download filtered data slices for offline review.
+        1. Start from Home and choose the property valuation workflow.
+        2. Enter property attributes in the Valuation sidebar.
+        3. Explore Model Insights for dataset diagnostics and model behavior.
+        4. Download filtered data slices for offline review.
 
         **Stack**
         - Frontend: Streamlit + Plotly
-        - API: FastAPI + XGBoost
-        - Backend endpoint: `{PREDICT_ENDPOINT}`
+        - Inference: shared local inference service + XGBoost
+        - API layer: FastAPI reuses the same inference service
 
         **Deployment**
-        Set the `API_URL` environment variable to point the frontend at your hosted API
-        (for example, `https://api.example.com`).
+        The Streamlit application is designed to remain directly deployable on
+        Streamlit Cloud without requiring a separately hosted FastAPI server.
         """
     )
     st.markdown("</div>", unsafe_allow_html=True)
@@ -1192,33 +1458,42 @@ def main() -> None:
         st.session_state.prediction_result = None
     if "prediction_error" not in st.session_state:
         st.session_state.prediction_error = None
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "Home"
 
-    render_sidebar_inputs()
-    run_prediction_flow()
+    active_page = render_navigation()
 
-    st.markdown(f'<p class="hero-title">{APP_TITLE}</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="hero-subtitle">'
-        "AI-powered housing price estimation with real-time model inference."
-        "</p>",
-        unsafe_allow_html=True,
-    )
-
-    tab_property, tab_prediction, tab_analytics, tab_about = st.tabs(
-        ["Property Details", "Prediction", "Analytics", "About"]
-    )
-
-    with tab_property:
-        render_property_details_section()
-
-    with tab_prediction:
-        render_prediction_section()
-
-    with tab_analytics:
+    if active_page == "Valuation":
+        render_sidebar_inputs()
+        run_prediction_flow()
+        render_valuation_page()
+    elif active_page == "Market Intelligence":
+        render_coming_soon(
+            "Market Intelligence",
+            (
+                "Future versions will reorganize housing trends, relationships, "
+                "and market-level insights into a decision-support experience."
+            ),
+        )
+    elif active_page == "Model Insights":
+        render_page_heading(
+            "Technical Analytics",
+            "Model Insights",
+            (
+                "Review the current V1 dataset analytics, feature importance, "
+                "SHAP explainability, correlations, and model performance."
+            ),
+        )
         render_analytics_section()
-
-    with tab_about:
+    elif active_page == "About":
+        render_page_heading(
+            "Product Context",
+            "About",
+            "Understand the current prototype, architecture, and known boundaries.",
+        )
         render_about_section()
+    else:
+        render_home_page()
 
 
 if __name__ == "__main__":
