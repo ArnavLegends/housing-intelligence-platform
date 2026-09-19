@@ -9,6 +9,7 @@ Set API_URL for deployment (default: http://127.0.0.1:8000).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,31 @@ DEFAULT_PROPERTY: dict[str, float | int] = {
     "Number of schools nearby": 2,
     "Distance from the airport": 51,
 }
+
+
+@dataclass(frozen=True)
+class PropertyValuationInput:
+    bedrooms: int
+    bathrooms: float
+    living_area: int
+    lot_area: int
+    floors: float
+    built_year: int
+    condition: int
+    construction_quality: int
+    waterfront: int
+    renovated: bool
+    renovation_year: int
+    postal_code: int
+    latitude: float
+    longitude: float
+    views: int
+    area_excl_basement: int
+    basement_area: int
+    living_area_renov: int
+    lot_area_renov: int
+    schools_nearby: int
+    airport_distance: int
 
 
 def apply_custom_styles() -> None:
@@ -280,29 +306,63 @@ def format_currency(value: float) -> str:
     return f"₹{value:,.2f}"
 
 
-def build_payload() -> dict[str, float | int]:
+def collect_valuation_input() -> PropertyValuationInput:
+    renovated = bool(st.session_state.get("renovated", False))
+    return PropertyValuationInput(
+        bedrooms=st.session_state.bedrooms,
+        bathrooms=st.session_state.bathrooms,
+        living_area=st.session_state.living_area,
+        lot_area=st.session_state.lot_area,
+        floors=st.session_state.floors,
+        built_year=st.session_state.built_year,
+        condition=st.session_state.condition,
+        construction_quality=st.session_state.construction_quality,
+        waterfront=st.session_state.waterfront,
+        renovated=renovated,
+        renovation_year=st.session_state.renovation_year if renovated else 0,
+        postal_code=st.session_state.postal_code,
+        latitude=st.session_state.latitude,
+        longitude=st.session_state.longitude,
+        views=st.session_state.views,
+        area_excl_basement=st.session_state.area_excl_basement,
+        basement_area=st.session_state.basement_area,
+        living_area_renov=st.session_state.living_area_renov,
+        lot_area_renov=st.session_state.lot_area_renov,
+        schools_nearby=st.session_state.schools_nearby,
+        airport_distance=st.session_state.airport_distance,
+    )
+
+
+def build_prediction_payload(
+    valuation_input: PropertyValuationInput,
+) -> dict[str, float | int]:
+    """Translate user-facing valuation inputs to the model's 20-feature schema."""
     return {
-        "number of bedrooms": st.session_state.bedrooms,
-        "number of bathrooms": st.session_state.bathrooms,
-        "living area": st.session_state.living_area,
-        "lot area": st.session_state.lot_area,
-        "number of floors": st.session_state.floors,
-        "waterfront present": st.session_state.waterfront,
-        "number of views": st.session_state.views,
-        "condition of the house": st.session_state.condition,
-        "grade of the house": st.session_state.grade,
-        "Area of the house(excluding basement)": st.session_state.area_excl_basement,
-        "Area of the basement": st.session_state.basement_area,
-        "Built Year": st.session_state.built_year,
-        "Renovation Year": st.session_state.renovation_year,
-        "Postal Code": st.session_state.postal_code,
-        "Lattitude": st.session_state.latitude,
-        "Longitude": st.session_state.longitude,
-        "living_area_renov": st.session_state.living_area_renov,
-        "lot_area_renov": st.session_state.lot_area_renov,
-        "Number of schools nearby": st.session_state.schools_nearby,
-        "Distance from the airport": st.session_state.airport_distance,
+        "number of bedrooms": valuation_input.bedrooms,
+        "number of bathrooms": valuation_input.bathrooms,
+        "living area": valuation_input.living_area,
+        "lot area": valuation_input.lot_area,
+        "number of floors": valuation_input.floors,
+        "waterfront present": valuation_input.waterfront,
+        "number of views": valuation_input.views,
+        "condition of the house": valuation_input.condition,
+        "grade of the house": valuation_input.construction_quality,
+        "Area of the house(excluding basement)": valuation_input.area_excl_basement,
+        "Area of the basement": valuation_input.basement_area,
+        "Built Year": valuation_input.built_year,
+        "Renovation Year": valuation_input.renovation_year,
+        "Postal Code": valuation_input.postal_code,
+        "Lattitude": valuation_input.latitude,
+        "Longitude": valuation_input.longitude,
+        "living_area_renov": valuation_input.living_area_renov,
+        "lot_area_renov": valuation_input.lot_area_renov,
+        "Number of schools nearby": valuation_input.schools_nearby,
+        "Distance from the airport": valuation_input.airport_distance,
     }
+
+
+def build_payload() -> dict[str, float | int]:
+    return build_prediction_payload(collect_valuation_input())
 
 
 def parse_api_error(response: requests.Response) -> str:
@@ -495,11 +555,16 @@ def render_valuation_page() -> None:
         "Sell Property",
         "Property Valuation",
         (
-            "Use the current V1 prediction workflow to estimate a property's "
-            "value from the trained model. Phase 2 will simplify these inputs."
+            "Tell us about your property to estimate its value using the "
+            "current machine-learning valuation model."
         ),
     )
-    detail_col, prediction_col = st.columns([1.35, 1], gap="medium")
+    submitted = render_valuation_form()
+    if submitted:
+        st.session_state.run_prediction = True
+        run_prediction_flow()
+
+    detail_col, prediction_col = st.columns([1.2, 1], gap="medium")
     with detail_col:
         render_property_details_section()
     with prediction_col:
@@ -753,100 +818,120 @@ def compute_shap_summary(
 
 def render_sidebar_inputs() -> None:
     with st.sidebar:
-        st.markdown("### Valuation Inputs")
-        st.caption("Enter property features to generate the current model estimate.")
+        st.markdown("### Valuation")
+        st.caption("Use the Valuation page form to enter property details.")
 
-        st.number_input(
-            "Bedrooms",
-            min_value=1,
-            max_value=20,
-            value=int(DEFAULT_PROPERTY["number of bedrooms"]),
-            key="bedrooms",
+
+def render_valuation_form() -> bool:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("Sell Your Property")
+    st.caption(
+        "Tell us about your property to estimate its value using the current "
+        "machine-learning valuation model."
+    )
+
+    with st.form("property_valuation_form"):
+        st.markdown("#### Property Basics")
+        basics_col1, basics_col2, basics_col3 = st.columns(3)
+        with basics_col1:
+            st.number_input(
+                "Bedrooms",
+                min_value=1,
+                max_value=20,
+                value=int(DEFAULT_PROPERTY["number of bedrooms"]),
+                key="bedrooms",
+            )
+            st.number_input(
+                "Living area (sq ft)",
+                min_value=100,
+                value=int(DEFAULT_PROPERTY["living area"]),
+                step=50,
+                key="living_area",
+            )
+        with basics_col2:
+            st.number_input(
+                "Bathrooms",
+                min_value=0.5,
+                max_value=20.0,
+                value=float(DEFAULT_PROPERTY["number of bathrooms"]),
+                step=0.5,
+                key="bathrooms",
+            )
+            st.number_input(
+                "Lot area (sq ft)",
+                min_value=100,
+                value=int(DEFAULT_PROPERTY["lot area"]),
+                step=50,
+                key="lot_area",
+            )
+        with basics_col3:
+            st.number_input(
+                "Floors",
+                min_value=1.0,
+                max_value=10.0,
+                value=float(DEFAULT_PROPERTY["number of floors"]),
+                step=0.5,
+                key="floors",
+            )
+            st.number_input(
+                "Year built",
+                min_value=1800,
+                max_value=2100,
+                value=int(DEFAULT_PROPERTY["Built Year"]),
+                key="built_year",
+            )
+
+        st.divider()
+        st.markdown("#### Condition & Quality")
+        st.caption("These values follow the current model's existing numeric scales.")
+        condition_col1, condition_col2, condition_col3 = st.columns(3)
+        with condition_col1:
+            st.slider(
+                "Property condition (1-5)",
+                min_value=1,
+                max_value=5,
+                value=int(DEFAULT_PROPERTY["condition of the house"]),
+                key="condition",
+            )
+        with condition_col2:
+            st.slider(
+                "Construction quality indicator (1-13)",
+                min_value=1,
+                max_value=13,
+                value=int(DEFAULT_PROPERTY["grade of the house"]),
+                key="construction_quality",
+            )
+        with condition_col3:
+            st.selectbox(
+                "Waterfront",
+                options=[0, 1],
+                format_func=lambda x: "Yes" if x == 1 else "No",
+                index=int(DEFAULT_PROPERTY["waterfront present"]),
+                key="waterfront",
+            )
+
+        st.divider()
+        st.markdown("#### Renovation")
+        renovated = st.checkbox(
+            "Has the property been renovated?",
+            value=bool(st.session_state.get("renovated", False)),
+            key="renovated",
         )
         st.number_input(
-            "Bathrooms",
-            min_value=0.5,
-            max_value=20.0,
-            value=float(DEFAULT_PROPERTY["number of bathrooms"]),
-            step=0.5,
-            key="bathrooms",
-        )
-        st.number_input(
-            "Living area (sq ft)",
-            min_value=100,
-            value=int(DEFAULT_PROPERTY["living area"]),
-            step=50,
-            key="living_area",
-        )
-        st.number_input(
-            "Lot area (sq ft)",
-            min_value=100,
-            value=int(DEFAULT_PROPERTY["lot area"]),
-            step=50,
-            key="lot_area",
-        )
-        st.number_input(
-            "Floors",
-            min_value=1.0,
-            max_value=10.0,
-            value=float(DEFAULT_PROPERTY["number of floors"]),
-            step=0.5,
-            key="floors",
-        )
-        st.selectbox(
-            "Waterfront",
-            options=[0, 1],
-            format_func=lambda x: "Yes" if x == 1 else "No",
-            index=int(DEFAULT_PROPERTY["waterfront present"]),
-            key="waterfront",
-        )
-        st.number_input(
-            "Views",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["number of views"]),
-            key="views",
-        )
-        st.slider(
-            "Condition (1–5)",
-            min_value=1,
-            max_value=5,
-            value=int(DEFAULT_PROPERTY["condition of the house"]),
-            key="condition",
-        )
-        st.slider(
-            "Grade (1–13)",
-            min_value=1,
-            max_value=13,
-            value=int(DEFAULT_PROPERTY["grade of the house"]),
-            key="grade",
-        )
-        st.number_input(
-            "Area excluding basement (sq ft)",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["Area of the house(excluding basement)"]),
-            step=50,
-            key="area_excl_basement",
-        )
-        st.number_input(
-            "Basement area (sq ft)",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["Area of the basement"]),
-            step=50,
-            key="basement_area",
-        )
-        st.number_input(
-            "Built year",
-            min_value=1800,
-            max_value=2100,
-            value=int(DEFAULT_PROPERTY["Built Year"]),
-            key="built_year",
-        )
-        st.number_input(
-            "Renovation year (0 if none)",
+            "Renovation year",
             min_value=0,
             max_value=2100,
             value=int(DEFAULT_PROPERTY["Renovation Year"]),
+            disabled=not renovated,
             key="renovation_year",
+        )
+
+        st.divider()
+        st.markdown("#### Location & Context")
+        st.caption(
+            "Postal code is the normal user-facing location input. Advanced "
+            "location fields are still required by the current model and may be "
+            "automated in a later version."
         )
         st.number_input(
             "Postal code",
@@ -854,54 +939,88 @@ def render_sidebar_inputs() -> None:
             value=int(DEFAULT_PROPERTY["Postal Code"]),
             key="postal_code",
         )
-        st.number_input(
-            "Latitude",
-            min_value=-90.0,
-            max_value=90.0,
-            value=float(DEFAULT_PROPERTY["Lattitude"]),
-            format="%.4f",
-            key="latitude",
-        )
-        st.number_input(
-            "Longitude",
-            min_value=-180.0,
-            max_value=180.0,
-            value=float(DEFAULT_PROPERTY["Longitude"]),
-            format="%.4f",
-            key="longitude",
-        )
-        st.number_input(
-            "Living area after renovation (sq ft)",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["living_area_renov"]),
-            step=50,
-            key="living_area_renov",
-        )
-        st.number_input(
-            "Lot area after renovation (sq ft)",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["lot_area_renov"]),
-            step=50,
-            key="lot_area_renov",
-        )
-        st.number_input(
-            "Schools nearby",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["Number of schools nearby"]),
-            key="schools_nearby",
-        )
-        st.number_input(
-            "Distance from airport (km)",
-            min_value=0,
-            value=int(DEFAULT_PROPERTY["Distance from the airport"]),
-            key="airport_distance",
+
+        with st.expander("Advanced Details", expanded=False):
+            st.markdown("##### Property size details")
+            size_col1, size_col2 = st.columns(2)
+            with size_col1:
+                st.number_input(
+                    "Area excluding basement (sq ft)",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["Area of the house(excluding basement)"]),
+                    step=50,
+                    key="area_excl_basement",
+                )
+                st.number_input(
+                    "Living area after renovation (sq ft)",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["living_area_renov"]),
+                    step=50,
+                    key="living_area_renov",
+                )
+            with size_col2:
+                st.number_input(
+                    "Basement area (sq ft)",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["Area of the basement"]),
+                    step=50,
+                    key="basement_area",
+                )
+                st.number_input(
+                    "Lot area after renovation (sq ft)",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["lot_area_renov"]),
+                    step=50,
+                    key="lot_area_renov",
+                )
+
+            st.markdown("##### Model-required location and context")
+            location_col1, location_col2 = st.columns(2)
+            with location_col1:
+                st.number_input(
+                    "Latitude",
+                    min_value=-90.0,
+                    max_value=90.0,
+                    value=float(DEFAULT_PROPERTY["Lattitude"]),
+                    format="%.4f",
+                    key="latitude",
+                )
+                st.number_input(
+                    "Number of views",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["number of views"]),
+                    key="views",
+                )
+                st.number_input(
+                    "Number of schools nearby",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["Number of schools nearby"]),
+                    key="schools_nearby",
+                )
+            with location_col2:
+                st.number_input(
+                    "Longitude",
+                    min_value=-180.0,
+                    max_value=180.0,
+                    value=float(DEFAULT_PROPERTY["Longitude"]),
+                    format="%.4f",
+                    key="longitude",
+                )
+                st.number_input(
+                    "Distance from airport (km)",
+                    min_value=0,
+                    value=int(DEFAULT_PROPERTY["Distance from the airport"]),
+                    key="airport_distance",
+                )
+
+        submitted = st.form_submit_button(
+            "Estimate Property Value",
+            type="primary",
+            use_container_width=True,
         )
 
-        st.divider()
-        predict_clicked = st.button("Estimate Value", type="primary", use_container_width=True)
-
-    if predict_clicked:
-        st.session_state.run_prediction = True
+    st.markdown("</div>", unsafe_allow_html=True)
+    return submitted
 
 
 def render_property_details_section() -> None:
@@ -925,9 +1044,9 @@ def render_property_details_section() -> None:
         st.write(
             f"Waterfront: **{'Yes' if payload['waterfront present'] else 'No'}**"
         )
-        st.write(f"Views: **{payload['number of views']}**")
+        st.write(f"Views indicator: **{payload['number of views']}**")
         st.write(f"Condition: **{payload['condition of the house']}/5**")
-        st.write(f"Grade: **{payload['grade of the house']}/13**")
+        st.write(f"Construction quality: **{payload['grade of the house']}/13**")
         st.write(
             f"Basement area: **{payload['Area of the basement']:,} sq ft**"
         )
@@ -1465,7 +1584,6 @@ def main() -> None:
 
     if active_page == "Valuation":
         render_sidebar_inputs()
-        run_prediction_flow()
         render_valuation_page()
     elif active_page == "Market Intelligence":
         render_coming_soon(

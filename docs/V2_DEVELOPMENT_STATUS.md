@@ -416,11 +416,9 @@ Buy Property, Invest, and Explore Market remain non-functional future workflows.
 
 Next action:
 
-Start Phase 1B - Sell Property / Valuation UX.
+Phase 1B is now complete. Wait for an explicit next milestone request before starting Phase 1C, Phase 2, or any advanced V2 work.
 
-Phase 1B should redesign the existing property-entry experience around user-facing residential property concepts while preserving the underlying model feature schema and working inference path.
-
-Phase 1B should not introduce:
+Future milestones should not introduce unrelated:
 
 model changes
 
@@ -439,3 +437,118 @@ LLM features
 remote backend infrastructure
 
 See docs/V2_IMPLEMENTATION_PLAN.md for the complete roadmap.
+
+Phase 1B - Sell Property / Valuation UX
+Status: Completed
+
+Phase 1B redesigned the Valuation workflow so the primary input experience uses residential-property concepts instead of exposing the full raw model feature form.
+
+What changed
+The full property-entry form moved from the sidebar into the Valuation page content area.
+
+The Valuation page now presents:
+
+Sell Your Property
+
+Property Basics
+
+Condition & Quality
+
+Renovation
+
+Location & Context
+
+Advanced Details
+
+User-facing form structure
+Property Basics contains bedrooms, bathrooms, living area, lot area, floors, and year built.
+
+Condition & Quality contains property condition, construction quality indicator, and waterfront.
+
+Renovation contains renovation status and renovation year.
+
+Location & Context contains postal code as the primary user-facing location field.
+
+Advanced Details contains model-required secondary fields including area excluding basement, basement area, renovated area fields, latitude, longitude, number of views, schools nearby, and airport distance.
+
+Model-schema separation
+A small PropertyValuationInput dataclass now represents the user-facing valuation form state.
+
+The build_prediction_payload function is the adapter between user-facing valuation data and the existing 20-feature model payload.
+
+The adapter preserves the existing internal model field names exactly, including:
+
+number of bedrooms
+
+number of bathrooms
+
+living area
+
+lot area
+
+number of floors
+
+waterfront present
+
+number of views
+
+condition of the house
+
+grade of the house
+
+Area of the house(excluding basement)
+
+Area of the basement
+
+Built Year
+
+Renovation Year
+
+Postal Code
+
+Lattitude
+
+Longitude
+
+living_area_renov
+
+lot_area_renov
+
+Number of schools nearby
+
+Distance from the airport
+
+What remained unchanged
+XGBoost model
+
+training pipeline
+
+dataset
+
+saved artifacts
+
+shared inference implementation
+
+FastAPI API contract
+
+analytics calculations
+
+SHAP methodology
+
+feature-importance methodology
+
+Model Insights functionality
+
+Validation performed
+Python compile validation was run for streamlit_app.py.
+
+git diff --check was run.
+
+The model payload adapter was structurally verified to emit all 20 required model features.
+
+The inference call path was verified to still reach get_inference_service().predict(...).
+
+The old complete sidebar property form was removed from the active UI path.
+
+Next milestone
+The next milestone should continue only when explicitly requested. Do not proceed automatically into Phase 1C, Phase 2, valuation uncertainty, local SHAP, or market intelligence redesign.
